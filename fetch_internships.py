@@ -5,6 +5,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# ================== EMAIL CONFIG ==================
 TO_EMAIL = "chirandiproy@gmail.com"
 
 FROM_EMAIL = os.environ["FROM_EMAIL"]
@@ -12,13 +13,33 @@ SMTP_HOST = os.environ["SMTP_HOST"]
 SMTP_PORT = int(os.environ["SMTP_PORT"])
 SMTP_USER = os.environ["SMTP_USER"]
 SMTP_PASS = os.environ["SMTP_PASS"]
+
 SERPAPI_KEY = os.environ["SERPAPI_KEY"]
 
-ROLES = ["Software Intern", "Data Science Intern", "Product Intern"]
+# ================== SEARCH FILTERS ==================
+ROLES = [
+    "Data Science Intern",
+    "Python Developer Intern",
+    "Data Analyst Intern",
+    "Machine Learning Intern",
+    "Business Analytics Intern",
+    "AI Intern"
+]
+
+KEYWORDS = [
+    "python",
+    "data science",
+    "machine learning",
+    "data analytics",
+    "sql",
+    "pandas",
+    "numpy"
+]
+
 LOCATIONS = ["India", "Remote", "Delhi NCR"]
 MAX_RESULTS = 8
 
-
+# ================== FETCH JOBS ==================
 def fetch_jobs():
     jobs = []
 
@@ -26,35 +47,61 @@ def fetch_jobs():
         for loc in LOCATIONS:
             params = {
                 "engine": "google_jobs",
-                "q": f"{role} fresher",
+                "q": f"{role} fresher python",
                 "location": loc,
                 "api_key": SERPAPI_KEY
             }
 
-            r = requests.get("https://serpapi.com/search.json", params=params, timeout=30)
-            data = r.json()
+            response = requests.get(
+                "https://serpapi.com/search.json",
+                params=params,
+                timeout=30
+            )
 
-            for j in data.get("jobs_results", [])[:2]:
+            data = response.json()
+
+            for j in data.get("jobs_results", []):
+                description = j.get("description", "").lower()
+
+                # 🔍 Keyword filtering
+                if not any(k in description for k in KEYWORDS):
+                    continue
+
                 jobs.append({
-                    "title": j.get("title"),
-                    "company": j.get("company_name"),
-                    "location": j.get("location"),
+                    "title": j.get("title", "N/A"),
+                    "company": j.get("company_name", "N/A"),
+                    "location": j.get("location", loc),
                     "summary": j.get("description", "")[:250],
-                    "link": j.get("related_links", [{}])[0].get("link", "")
+                    "link": j.get("related_links", [{}])[0].get("link", "N/A")
                 })
 
-            if len(jobs) >= MAX_RESULTS:
-                return jobs
+                if len(jobs) >= MAX_RESULTS:
+                    return jobs
 
     return jobs
 
+# ================== EMAIL ==================
+def send_email(jobs):
+    today = datetime.date.today()
+    subject = f"Daily Data Science & Python Internships — {today}"
 
-def send_email(body):
+    if not jobs:
+        body = "No Data Science / Python / Analytics internships found today."
+    else:
+        lines = [f"Daily Internship Report — {today}\n"]
+        for i, j in enumerate(jobs, 1):
+            lines.append(
+                f"{i}. {j['title']} — {j['company']}\n"
+                f"Location: {j['location']}\n"
+                f"Summary: {j['summary']}\n"
+                f"Link: {j['link']}\n"
+            )
+        body = "\n".join(lines)
+
     msg = MIMEMultipart()
-    msg["Subject"] = f"Daily Internships Report — {datetime.date.today()}"
     msg["From"] = FROM_EMAIL
     msg["To"] = TO_EMAIL
-
+    msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
@@ -62,26 +109,10 @@ def send_email(body):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-
+# ================== MAIN ==================
 def main():
     jobs = fetch_jobs()
-
-    if not jobs:
-        body = "No internships found today."
-    else:
-        lines = [f"Daily Internships Report — {datetime.date.today()}\n"]
-        for i, j in enumerate(jobs, 1):
-            lines.append(
-                f"{i}. {j['title']} — {j['company']}\n"
-                f"Location: {j['location']}\n"
-                f"{j['summary']}\n"
-                f"Link: {j['link']}\n"
-            )
-        body = "\n".join(lines)
-
-    send_email(body)
-
+    send_email(jobs)
 
 if __name__ == "__main__":
     main()
-
