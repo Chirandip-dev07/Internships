@@ -9,6 +9,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from urllib.parse import quote_plus
 import requests
+import feedparser
 from bs4 import BeautifulSoup
 
 TO_EMAIL = "chirandiproy@gmail.com"
@@ -88,30 +89,43 @@ def search_internshala(role, location, max_results=3):
     except Exception:
         return []
 
+def search_indeed_rss(role, location, limit=3):
+    query = f"{role} internship fresher {location}"
+    url = f"https://www.indeed.com/rss?q={quote_plus(query)}"
+    feed = feedparser.parse(url)
+
+    results = []
+    for entry in feed.entries[:limit]:
+        results.append({
+            "title": entry.title,
+            "company": entry.get("author", "Unknown"),
+            "location": location,
+            "summary": entry.summary[:250] if "summary" in entry else "",
+            "link": entry.link
+        })
+    return results
+
 def gather_listings():
     listings = []
-    per_source = max(1, MAX_RESULTS // 3)
+
     for role in ROLES:
         for loc in LOCATIONS:
-            listings.extend(search_internshala(role, loc, per_source))
-            time.sleep(1)
-            listings.extend(search_wellfound(role, loc, per_source))
-            time.sleep(1)
-            listings.extend(search_indeed(role, loc, per_source))
-            time.sleep(1)
+            listings.extend(search_indeed_rss(role, loc, 2))
             if len(listings) >= MAX_RESULTS:
                 break
         if len(listings) >= MAX_RESULTS:
             break
+
     seen = set()
-    dedup = []
-    for l in listings:
-        if l["link"] not in seen:
-            seen.add(l["link"])
-            dedup.append(l)
-        if len(dedup) >= MAX_RESULTS:
+    final = []
+    for job in listings:
+        if job["link"] not in seen:
+            seen.add(job["link"])
+            final.append(job)
+        if len(final) >= MAX_RESULTS:
             break
-    return dedup
+
+    return final
 
 def compose_markdown(listings):
     today = datetime.datetime.now().strftime("%Y-%m-%d")
