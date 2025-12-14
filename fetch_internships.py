@@ -1,171 +1,87 @@
-
-
 import os
-import sys
+import requests
 import datetime
 import smtplib
-import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from urllib.parse import quote_plus
-import requests
-import feedparser
-from bs4 import BeautifulSoup
 
 TO_EMAIL = "chirandiproy@gmail.com"
-FROM_EMAIL = os.environ.get("FROM_EMAIL")      
-SMTP_HOST = os.environ.get("SMTP_HOST")         
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER")
-SMTP_PASS = os.environ.get("SMTP_PASS")
 
-ROLES = ["software development", "data science", "product"]
-LOCATIONS = ["remote", "India", "Delhi NCR"]
+FROM_EMAIL = os.environ["FROM_EMAIL"]
+SMTP_HOST = os.environ["SMTP_HOST"]
+SMTP_PORT = int(os.environ["SMTP_PORT"])
+SMTP_USER = os.environ["SMTP_USER"]
+SMTP_PASS = os.environ["SMTP_PASS"]
+SERPAPI_KEY = os.environ["SERPAPI_KEY"]
+
+ROLES = ["Software Intern", "Data Science Intern", "Product Intern"]
+LOCATIONS = ["India", "Remote", "Delhi NCR"]
 MAX_RESULTS = 8
 
-def search_indeed(role, location, max_results=3):
-    q = quote_plus(role)
-    l = quote_plus(location)
-    url = f"https://www.indeed.com/jobs?q={q}&l={l}&sort=date"
-    try:
-        r = requests.get(url, timeout=15, headers={"User-Agent":"Mozilla/5.0"})
-        soup = BeautifulSoup(r.text, "html.parser")
-        cards = soup.select(".jobsearch-SerpJobCard")[:max_results]
-        results = []
-        for c in cards:
-            title = c.select_one(".title a")
-            if not title: continue
-            title_text = title.get_text(strip=True)
-            link = "https://www.indeed.com" + title.get("href")
-            company = c.select_one(".company").get_text(strip=True) if c.select_one(".company") else ""
-            loc = c.select_one(".location").get_text(strip=True) if c.select_one(".location") else location
-            summary = c.select_one(".summary").get_text(strip=True) if c.select_one(".summary") else ""
-            results.append({"title": title_text, "company": company, "location": loc, "summary": summary, "link": link})
-        return results
-    except Exception:
-        return []
 
-def search_wellfound(role, location, max_results=3):
-    q = quote_plus(role)
-    url = f"https://wellfound.com/jobs?query={q}"
-    try:
-        r = requests.get(url, timeout=15, headers={"User-Agent":"Mozilla/5.0"})
-        soup = BeautifulSoup(r.text, "html.parser")
-        cards = soup.select("a.AnchorLink_jobCard")[:max_results]
-        results = []
-        for c in cards:
-            title = c.select_one(".jobCard_title")
-            company = c.select_one(".jobCard_company")
-            link = "https://wellfound.com" + c.get("href")
-            results.append({
-                "title": title.get_text(strip=True) if title else "",
-                "company": company.get_text(strip=True) if company else "",
-                "location": location,
-                "summary": "",
-                "link": link
-            })
-        return results
-    except Exception:
-        return []
-
-def search_internshala(role, location, max_results=3):
-    q = quote_plus(role)
-    url = f"https://internshala.com/internships/{q}-internship"
-    try:
-        r = requests.get(url, timeout=15, headers={"User-Agent":"Mozilla/5.0"})
-        soup = BeautifulSoup(r.text, "html.parser")
-        cards = soup.select(".internship_listing")[:max_results]
-        results = []
-        for c in cards:
-            title = c.select_one("a.profile")
-            if not title: continue
-            title_text = title.get_text(strip=True)
-            link = "https://internshala.com" + title.get("href")
-            company = c.select_one(".company_name").get_text(strip=True) if c.select_one(".company_name") else ""
-            loc = c.select_one(".location_link").get_text(strip=True) if c.select_one(".location_link") else location
-            summary = c.select_one(".other_detail_item").get_text(strip=True) if c.select_one(".other_detail_item") else ""
-            results.append({"title": title_text, "company": company, "location": loc, "summary": summary, "link": link})
-        return results
-    except Exception:
-        return []
-
-def search_indeed_rss(role, location, limit=3):
-    query = f"{role} internship fresher {location}"
-    url = f"https://www.indeed.com/rss?q={quote_plus(query)}"
-    feed = feedparser.parse(url)
-
-    results = []
-    for entry in feed.entries[:limit]:
-        results.append({
-            "title": entry.title,
-            "company": entry.get("author", "Unknown"),
-            "location": location,
-            "summary": entry.summary[:250] if "summary" in entry else "",
-            "link": entry.link
-        })
-    return results
-
-def gather_listings():
-    listings = []
+def fetch_jobs():
+    jobs = []
 
     for role in ROLES:
         for loc in LOCATIONS:
-            listings.extend(search_indeed_rss(role, loc, 2))
-            if len(listings) >= MAX_RESULTS:
-                break
-        if len(listings) >= MAX_RESULTS:
-            break
+            params = {
+                "engine": "google_jobs",
+                "q": f"{role} fresher",
+                "location": loc,
+                "api_key": SERPAPI_KEY
+            }
 
-    seen = set()
-    final = []
-    for job in listings:
-        if job["link"] not in seen:
-            seen.add(job["link"])
-            final.append(job)
-        if len(final) >= MAX_RESULTS:
-            break
+            r = requests.get("https://serpapi.com/search.json", params=params, timeout=30)
+            data = r.json()
 
-    return final
+            for j in data.get("jobs_results", [])[:2]:
+                jobs.append({
+                    "title": j.get("title"),
+                    "company": j.get("company_name"),
+                    "location": j.get("location"),
+                    "summary": j.get("description", "")[:250],
+                    "link": j.get("related_links", [{}])[0].get("link", "")
+                })
 
-def compose_markdown(listings):
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    lines = [f"# Daily Internships Report — {today}\n"]
-    lines.append(f"Generated: {datetime.datetime.now().isoformat()}\n")
-    lines.append("## Listings\n")
-    for i, l in enumerate(listings, 1):
-        lines.append(f"### {i}. {l['title']} — {l['company']}\n")
-        lines.append(f"- **Location:** {l['location']}")
-        short = l['summary'] or "No short summary."
-        if len(short) > 280: short = short[:277] + "..."
-        lines.append(f"- **Summary:** {short}")
-        lines.append(f"- **Link:** {l['link']}\n")
-    return "\n".join(lines)
+            if len(jobs) >= MAX_RESULTS:
+                return jobs
 
-def send_email(subject, body):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
+    return jobs
+
+
+def send_email(body):
+    msg = MIMEMultipart()
+    msg["Subject"] = f"Daily Internships Report — {datetime.date.today()}"
     msg["From"] = FROM_EMAIL
     msg["To"] = TO_EMAIL
 
     msg.attach(MIMEText(body, "plain"))
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(FROM_EMAIL, [TO_EMAIL], msg.as_string())
+        server.send_message(msg)
+
 
 def main():
-    listings = gather_listings()
-    md = compose_markdown(listings)
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    subject = f"Daily Internships Report — {today}"
+    jobs = fetch_jobs()
 
-    fname = f"daily_internships_{today}.md"
-    with open(fname, "w", encoding="utf-8") as f:
-        f.write(md)
+    if not jobs:
+        body = "No internships found today."
+    else:
+        lines = [f"Daily Internships Report — {datetime.date.today()}\n"]
+        for i, j in enumerate(jobs, 1):
+            lines.append(
+                f"{i}. {j['title']} — {j['company']}\n"
+                f"Location: {j['location']}\n"
+                f"{j['summary']}\n"
+                f"Link: {j['link']}\n"
+            )
+        body = "\n".join(lines)
 
-    send_email(subject, md)
-    print("Email sent to", TO_EMAIL)
+    send_email(body)
+
 
 if __name__ == "__main__":
     main()
+
